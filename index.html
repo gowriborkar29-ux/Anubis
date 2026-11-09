@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calculator Menu Display</title>
+  <meta name="description" content="Menu-driven calculator based on Calculator display menu with interactive GUI, float inputs, and calculation history.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+  <!-- Subtle ambient background glow -->
+  <div class="bg-blur blur-1"></div>
+  <div class="bg-blur blur-2"></div>
+  <div class="bg-blur blur-3"></div>
+
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="main-header">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="2" width="16" height="20" rx="3" ry="3"/>
+            <line x1="8" y1="6" x2="16" y2="6"/>
+            <line x1="16" y1="14" x2="16" y2="18"/>
+            <path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01"/>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <h1>Calculator Menu Display</h1>
+          <p class="subtitle">Interactive Menu-Driven Calculator</p>
+        </div>
+      </div>
+
+      <!-- Action Utilities -->
+      <div class="header-actions">
+        <!-- Sound Toggle -->
+        <button class="sound-toggle-btn" id="soundToggle" aria-label="Toggle audio feedback" title="Toggle Sound Feedback">
+          <svg class="sound-icon sound-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+          <svg class="sound-icon sound-off hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <line x1="23" y1="9" x2="17" y2="15"></line>
+            <line x1="17" y1="9" x2="23" y2="15"></line>
+          </svg>
+        </button>
+        
+        <!-- Theme Toggle -->
+        <button class="theme-toggle-btn" id="themeToggle" aria-label="Toggle Dark / Light Theme" title="Toggle Theme">
+          <svg class="theme-icon sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="theme-icon moon-icon hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content: Calculator GUI -->
+    <main class="main-content">
+      <div class="gui-layout">
+
+        <!-- Left Column: Operations & Input Controls -->
+        <div class="gui-card menu-selection-card">
+          <div class="card-header">
+            <div class="step-badge">Step 1</div>
+            <h2>Select Menu Option</h2>
+          </div>
+
+          <p class="section-desc">Choose a basic operation (1 &ndash; 4) or Exit (5):</p>
+
+          <!-- Menu Options Grid -->
+          <div class="menu-grid" role="radiogroup" aria-label="Menu options">
+            <button class="menu-option-btn active" data-choice="1" id="btn-choice-1" role="radio" aria-checked="true">
+              <span class="option-num">1</span>
+              <div class="option-details">
+                <span class="option-title">Addition</span>
+                <span class="option-formula">result = a + b</span>
+              </div>
+              <div class="option-icon">+</div>
+            </button>
+
+            <button class="menu-option-btn" data-choice="2" id="btn-choice-2" role="radio" aria-checked="false">
+              <span class="option-num">2</span>
+              <div class="option-details">
+                <span class="option-title">Subtraction</span>
+                <span class="option-formula">result = a &minus; b</span>
+              </div>
+              <div class="option-icon">&minus;</div>
+            </button>
+
+            <button class="menu-option-btn" data-choice="3" id="btn-choice-3" role="radio" aria-checked="false">
+              <span class="option-num">3</span>
+              <div class="option-details">
+                <span class="option-title">Division</span>
+                <span class="option-formula">result = a / b</span>
+              </div>
+              <div class="option-icon">&divide;</div>
+            </button>
+
+            <button class="menu-option-btn" data-choice="4" id="btn-choice-4" role="radio" aria-checked="false">
+              <span class="option-num">4</span>
+              <div class="option-details">
+                <span class="option-title">Multiplication</span>
+                <span class="option-formula">result = a &times; b</span>
+              </div>
+              <div class="option-icon">&times;</div>
+            </button>
+
+            <button class="menu-option-btn exit-btn" data-choice="13" id="btn-choice-13" role="radio" aria-checked="false">
+              <span class="option-num">5</span>
+              <div class="option-details">
+                <span class="option-title">Exit</span>
+              </div>
+              <div class="option-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+              </div>
+            </button>
+          </div>
+
+          <div class="advanced-function-panel">
+            <div class="card-header">
+              <div class="step-badge">Advanced</div>
+              <h2>Trig &amp; Log Functions</h2>
+            </div>
+
+            <div class="function-group">
+              <h3>Trigonometric</h3>
+              <p class="function-expression">Angles are in radians.</p>
+              <div class="function-grid">
+                <button class="advanced-function-btn" data-choice="5" role="radio" aria-checked="false">
+                  <span class="function-name">sin</span>
+                  <span class="function-expression">sin(x)</span>
+                </button>
+                <button class="advanced-function-btn" data-choice="6" role="radio" aria-checked="false">
+                  <span class="function-name">cos</span>
+                  <span class="function-expression">cos(x)</span>
+                </button>
+                <button class="advanced-function-btn" data-choice="7" role="radio" aria-checked="false">
+                  <span class="function-name">tan</span>
+                  <span class="function-expression">tan(x)</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="function-group">
+              <h3>Inverse Trigonometric</h3>
+              <div class="function-grid">
+                <button class="advanced-function-btn" data-choice="8" role="radio" aria-checked="false">
+                  <span class="function-name">sin<sup>-1</sup></span>
+                  <span class="function-expression">sin<sup>-1</sup>(x)</span>
+                </button>
+                <button class="advanced-function-btn" data-choice="9" role="radio" aria-checked="false">
+                  <span class="function-name">cos<sup>-1</sup></span>
+                  <span class="function-expression">cos<sup>-1</sup>(x)</span>
+                </button>
+                <button class="advanced-function-btn" data-choice="10" role="radio" aria-checked="false">
+                  <span class="function-name">tan<sup>-1</sup></span>
+                  <span class="function-expression">tan<sup>-1</sup>(x)</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="function-group">
+              <h3>Logarithmic</h3>
+              <div class="function-grid compact-grid">
+                <button class="advanced-function-btn" data-choice="11" role="radio" aria-checked="false">
+                  <span class="function-name">log<sub>10</sub></span>
+                  <span class="function-expression">log10(x)</span>
+                </button>
+                <button class="advanced-function-btn" data-choice="12" role="radio" aria-checked="false">
+                  <span class="function-name">log<sub>e</sub></span>
+                  <span class="function-expression">ln(x)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Operands Section (Choices 1-12) -->
+          <div class="operands-section" id="operandsContainer">
+            <div class="card-header mt-4">
+              <div class="step-badge">Step 2</div>
+              <h2>Enter Values of a and b</h2>
+              <button class="swap-values-btn" id="swapBtn" title="Swap values of a and b">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                  <polyline points="17 14 12 9 7 14"></polyline>
+                  <line x1="12" y1="9" x2="12" y2="21"></line>
+                </svg>
+                <span>Swap</span>
+              </button>
+            </div>
+
+            <div class="input-row">
+              <!-- Input A -->
+              <div class="input-group">
+                <label for="inputA">
+                  <span class="var-name">Value a</span>
+                  <span class="var-type">float</span>
+                </label>
+                <div class="input-with-controls">
+                  <input type="number" id="inputA" step="any" placeholder="Enter a value">
+                  <div class="step-btns">
+                    <button class="step-btn" data-input="inputA" data-step="1" title="Increase a">+1</button>
+                    <button class="step-btn" data-input="inputA" data-step="-1" title="Decrease a">&minus;1</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="op-indicator" id="currentOpSymbol">+</div>
+
+              <!-- Input B -->
+              <div class="input-group" id="inputBGroup">
+                <label for="inputB">
+                  <span class="var-name">Value b</span>
+                  <span class="var-type">float</span>
+                </label>
+                <div class="input-with-controls">
+                  <input type="number" id="inputB" step="any" placeholder="Enter a value">
+                  <div class="step-btns">
+                    <button class="step-btn" data-input="inputB" data-step="1" title="Increase b">+1</button>
+                    <button class="step-btn" data-input="inputB" data-step="-1" title="Decrease b">&minus;1</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="action-buttons">
+              <button class="btn btn-primary" id="calculateBtn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                Calculate Result
+              </button>
+
+              <button class="btn btn-secondary" id="clearBtn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="1 4 1 10 7 10"></polyline>
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                </svg>
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <!-- Exit state overlay (Option 5) -->
+          <div class="exit-state-card hidden" id="exitStateCard">
+            <div class="exit-state-content">
+              <div class="exit-badge-icon">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="15" y1="9" x2="9" y2="15"></line>
+                  <line x1="9" y1="9" x2="15" y2="15"></line>
+                </svg>
+              </div>
+              <h3>Exiting Display</h3>
+              <p>Option 5 selected. The calculator session has ended.</p>
+              <button class="btn btn-primary mt-3" id="restartGuiBtn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+                Start New Session
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right Column: Result Output & History -->
+        <div class="gui-card result-card-column">
+          
+          <!-- Result Output Box -->
+          <div class="result-display-panel">
+            <div class="panel-header">
+              <div class="panel-header-left">
+                <span class="status-indicator live"></span>
+                <span class="panel-title">Output Result</span>
+              </div>
+            </div>
+
+            <div class="result-body">
+              <div class="operation-equation" id="equationDisplay">Enter values to calculate</div>
+              <div class="primary-result" id="primaryResultDisplay">
+                <span class="result-prefix">result=</span><span class="result-val"></span>
+              </div>
+
+              <div class="result-meta" id="resultMeta">
+                <span class="meta-tag">Operation: <strong id="choiceDisplay">1. Addition</strong></span>
+                <button class="copy-result-btn" id="copyResultBtn" title="Copy result to clipboard">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  <span>Copy</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Calculation History Log -->
+          <div class="history-card">
+            <div class="history-header">
+              <div class="history-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 14 14"></polyline>
+                </svg>
+                <span>Calculation History</span>
+                <span class="badge" id="iterationBadge">0 entries</span>
+              </div>
+              <div class="history-actions">
+                <span class="history-lock-status" id="historyLockStatus" role="status" aria-live="polite"></span>
+                <button class="history-lock-btn" id="historyLockBtn" type="button">Unlock</button>
+                <button class="export-history-btn" id="exportHistoryBtn" title="Export Log">Export</button>
+                <button class="clear-history-btn" id="clearHistoryBtn" title="Clear history">Clear</button>
+              </div>
+            </div>
+
+            <div class="history-list" id="historyList">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="main-footer">
+      <div class="footer-left">
+        <span>Based on <strong>Calculator display menu</strong></span>
+        <span class="separator">&bull;</span>
+        <span class="shortcut-hint">Shortcuts: <kbd>1</kbd>&ndash;<kbd>5</kbd> choose menu option &bull; <kbd>Enter</kbd> calculate &bull; <kbd>Esc</kbd> reset</span>
+      </div>
+      <div class="footer-right">
+        <span class="footer-tag">Calculator GUI</span>
+      </div>
+    </footer>
+  </div>
+
+  <dialog class="history-unlock-dialog" id="historyUnlockDialog" aria-labelledby="historyUnlockTitle">
+    <div class="history-unlock-content">
+      <h2 id="historyUnlockTitle">Unlock Calculation History</h2>
+      <p id="historyUnlockDescription"></p>
+      <form id="historyUnlockForm">
+        <label for="historyPassphrase">Passphrase</label>
+        <input type="password" id="historyPassphrase" autocomplete="off" required>
+        <div class="history-confirm-group hidden" id="historyConfirmGroup">
+          <label for="historyPassphraseConfirm">Confirm passphrase</label>
+          <input type="password" id="historyPassphraseConfirm" autocomplete="off">
+        </div>
+        <p class="history-unlock-error" id="historyUnlockError" role="alert"></p>
+        <div class="history-unlock-actions">
+          <button class="btn btn-primary" id="historyUnlockSubmit" type="submit">Unlock</button>
+          <button class="btn btn-secondary" id="skipHistoryUnlock" type="button">Continue without saving</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script src="script.js"></script>
+</body>
+</html>
