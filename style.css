@@ -870,6 +870,12 @@ body.light-theme .result-meta {
   font-size: 0.7rem;
 }
 
+.history-sync-status {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.history-sync-btn,
 .history-lock-btn,
 .export-history-btn,
 .clear-history-btn {
@@ -883,6 +889,7 @@ body.light-theme .result-meta {
   transition: all var(--transition-fast);
 }
 
+.history-sync-btn:hover,
 .history-lock-btn:hover,
 .export-history-btn:hover,
 .clear-history-btn:hover {

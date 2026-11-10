@@ -328,6 +328,8 @@
                 <span class="badge" id="iterationBadge">0 entries</span>
               </div>
               <div class="history-actions">
+                <span class="history-sync-status" id="historySyncStatus" role="status" aria-live="polite"></span>
+                <button class="history-sync-btn" id="historySyncBtn" type="button">Sync with GitHub</button>
                 <span class="history-lock-status" id="historyLockStatus" role="status" aria-live="polite"></span>
                 <button class="history-lock-btn" id="historyLockBtn" type="button">Unlock</button>
                 <button class="export-history-btn" id="exportHistoryBtn" title="Export Log">Export</button>
@@ -371,6 +373,7 @@
         </div>
         <p class="history-unlock-error" id="historyUnlockError" role="alert"></p>
         <div class="history-unlock-actions">
+          <button class="btn btn-secondary" id="historyDialogSyncBtn" type="button">Sync with GitHub</button>
           <button class="btn btn-primary" id="historyUnlockSubmit" type="submit">Unlock</button>
           <button class="btn btn-secondary" id="skipHistoryUnlock" type="button">Continue without saving</button>
         </div>
@@ -378,6 +381,8 @@
     </div>
   </dialog>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.min.js"></script>
+  <script src="supabase-config.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

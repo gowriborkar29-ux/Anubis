@@ -7,7 +7,11 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   const HISTORY_STORAGE_KEY = 'calc_menu_history_encrypted_v1';
+  const HISTORY_LEGACY_OWNER_KEY = 'calc_menu_history_legacy_owner_v1';
+  const HISTORY_LAST_USER_KEY = 'calc_menu_history_last_user_v1';
   const HISTORY_KDF_ITERATIONS = 600000;
+  const SUPABASE_HISTORY_TABLE = 'calculator_history_entries';
+  const SUPABASE_VAULT_TABLE = 'calculator_history_vaults';
 
   // ==========================================
   // STATE MANAGEMENT
@@ -22,7 +26,14 @@ document.addEventListener('DOMContentLoaded', () => {
     theme: localStorage.getItem('calc_menu_theme') || 'dark',
     history: [],
     historyKey: null,
-    historySaveQueue: Promise.resolve()
+    historySalt: null,
+    historyGeneration: null,
+    historySaveQueue: Promise.resolve(),
+    historySyncQueue: Promise.resolve(),
+    syncedEntryIds: new Set(),
+    cloudUser: null,
+    cloudVault: null,
+    cloudVaultError: null
   };
 
   // ==========================================
@@ -111,6 +122,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const historyConfirmGroup = document.getElementById('historyConfirmGroup');
   const historyPassphraseConfirm = document.getElementById('historyPassphraseConfirm');
   const skipHistoryUnlock = document.getElementById('skipHistoryUnlock');
+  const historySyncBtn = document.getElementById('historySyncBtn');
+  const historyDialogSyncBtn = document.getElementById('historyDialogSyncBtn');
+  const historySyncStatus = document.getElementById('historySyncStatus');
+  const supabaseConfig = window.CALCULATOR_SUPABASE_CONFIG;
+  const supabaseClient = window.supabase?.createClient &&
+    supabaseConfig?.url &&
+    supabaseConfig?.publishableKey
+    ? window.supabase.createClient(supabaseConfig.url, supabaseConfig.publishableKey)
+    : null;
+
+  function getHistoryStorageKey() {
+    const userId = state.cloudUser?.id || localStorage.getItem(HISTORY_LAST_USER_KEY);
+    return userId ? `${HISTORY_STORAGE_KEY}_${userId}` : HISTORY_STORAGE_KEY;
+  }
+
+  function associateLegacyHistoryWithUser(userId) {
+    localStorage.setItem(HISTORY_LAST_USER_KEY, userId);
+    const accountStorageKey = `${HISTORY_STORAGE_KEY}_${userId}`;
+    if (localStorage.getItem(accountStorageKey) !== null) return;
+
+    const legacyOwner = localStorage.getItem(HISTORY_LEGACY_OWNER_KEY);
+    const legacyHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!legacyHistory || (legacyOwner && legacyOwner !== userId)) return;
+
+    localStorage.setItem(HISTORY_LEGACY_OWNER_KEY, userId);
+    localStorage.setItem(accountStorageKey, legacyHistory);
+  }
 
   // ==========================================
   // THEME MANAGEMENT
@@ -357,7 +395,7 @@ document.addEventListener('DOMContentLoaded', () => {
     );
   }
 
-  async function encryptHistory(history, key, salt) {
+  async function encryptHistory(history, key, salt, generation) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ciphertext = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
@@ -369,23 +407,10 @@ document.addEventListener('DOMContentLoaded', () => {
       kdf: 'PBKDF2-SHA-256',
       iterations: HISTORY_KDF_ITERATIONS,
       salt: bytesToBase64(salt),
+      generation,
       iv: bytesToBase64(iv),
       ciphertext: bytesToBase64(new Uint8Array(ciphertext))
     });
-  }
-
-  function validateHistory(history) {
-    if (!Array.isArray(history) || history.some(entry =>
-      !entry ||
-      !Number.isInteger(entry.id) ||
-      typeof entry.opName !== 'string' ||
-      typeof entry.expression !== 'string' ||
-      typeof entry.resultStr !== 'string' ||
-      typeof entry.time !== 'string'
-    )) {
-      throw new Error('The saved history has an invalid format.');
-    }
-    return history;
   }
 
   async function decryptHistory(record, key) {
@@ -402,6 +427,322 @@ document.addEventListener('DOMContentLoaded', () => {
       base64ToBytes(record.ciphertext)
     );
     return validateHistory(JSON.parse(new TextDecoder().decode(plaintext)));
+  }
+
+  function createEntryId() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  async function encryptCloudEntry(entry, key) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      new TextEncoder().encode(JSON.stringify(entry))
+    );
+    return {
+      iv: bytesToBase64(iv),
+      ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+    };
+  }
+
+  async function decryptCloudEntry(record, key) {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToBytes(record.iv) },
+      key,
+      base64ToBytes(record.ciphertext)
+    );
+    const entry = JSON.parse(new TextDecoder().decode(plaintext));
+    validateHistory([entry]);
+    return entry;
+  }
+
+  function validateHistory(history) {
+    if (!Array.isArray(history) || history.some(entry =>
+      !entry ||
+      !Number.isInteger(entry.id) ||
+      typeof entry.opName !== 'string' ||
+      typeof entry.expression !== 'string' ||
+      typeof entry.resultStr !== 'string' ||
+      typeof entry.time !== 'string'
+    )) {
+      throw new Error('The saved history has an invalid format.');
+    }
+    history.forEach(entry => {
+      if (typeof entry.entryId !== 'string') entry.entryId = createEntryId();
+      if (!Number.isFinite(entry.createdAt)) entry.createdAt = 0;
+    });
+    return history;
+  }
+
+  function mergeHistory(...histories) {
+    const entries = new Map();
+    histories.flat().forEach(entry => {
+      if (!entries.has(entry.entryId)) entries.set(entry.entryId, entry);
+    });
+    return [...entries.values()].sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  function updateSyncStatus(message) {
+    if (!supabaseClient) {
+      historySyncBtn.textContent = 'Sync setup required';
+      historySyncBtn.disabled = true;
+      historyDialogSyncBtn.textContent = 'Sync setup required';
+      historyDialogSyncBtn.disabled = true;
+      historySyncStatus.textContent = 'Create a Supabase project; see SUPABASE_SETUP.md.';
+      return;
+    }
+
+    historySyncBtn.disabled = false;
+    historyDialogSyncBtn.disabled = false;
+    historySyncBtn.textContent = state.cloudUser ? 'Sign out' : 'Sync with GitHub';
+    historyDialogSyncBtn.textContent = state.cloudUser ? 'Sign out' : 'Sync with GitHub';
+    historySyncStatus.textContent = message || (state.cloudUser
+      ? `Signed in as ${state.cloudUser.user_metadata?.user_name || state.cloudUser.email || 'GitHub user'}.`
+      : 'Not signed in; history stays on this device.');
+  }
+
+  function updateHistoryLockStatus(message) {
+    const isUnlocked = state.historyKey !== null;
+    historyLockBtn.textContent = isUnlocked ? 'Lock' : 'Unlock';
+    historyLockBtn.setAttribute(
+      'aria-label',
+      isUnlocked ? 'Lock encrypted calculation history' : 'Unlock encrypted calculation history'
+    );
+    historyLockStatus.textContent = message || (isUnlocked
+      ? state.cloudUser
+        ? 'Unlocked; history syncs when online.'
+        : 'Unlocked; saved encrypted on this device.'
+      : 'Locked; unlock to view saved history.');
+  }
+
+  async function loadCloudVault() {
+    state.cloudVault = null;
+    state.cloudVaultError = null;
+    state.syncedEntryIds.clear();
+    if (!supabaseClient || !state.cloudUser) return null;
+    const userId = state.cloudUser.id;
+
+    try {
+      const { data, error } = await supabaseClient
+        .from(SUPABASE_VAULT_TABLE)
+        .select('salt, generation, format_version, kdf_iterations')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (state.cloudUser?.id !== userId) return null;
+      if (data) {
+        if (data.format_version !== 1 || data.kdf_iterations !== HISTORY_KDF_ITERATIONS) {
+          throw new Error('The synced history uses an unsupported encryption format.');
+        }
+        if (typeof data.generation !== 'string') {
+          throw new Error('The synced history is missing its generation marker.');
+        }
+        state.cloudVault = data;
+      }
+      return data;
+    } catch (error) {
+      if (state.cloudUser?.id !== userId) return null;
+      state.cloudVaultError = error;
+      throw error;
+    }
+  }
+
+  async function ensureCloudVault(userId, salt, generation) {
+    if (!supabaseClient || !state.cloudUser || state.cloudUser.id !== userId) return;
+    if (!state.cloudVault) {
+      const { data, error } = await supabaseClient
+        .from(SUPABASE_VAULT_TABLE)
+        .insert({
+          user_id: userId,
+          salt: bytesToBase64(salt),
+          generation,
+          format_version: 1,
+          kdf_iterations: HISTORY_KDF_ITERATIONS
+        })
+        .select('salt, generation, format_version, kdf_iterations')
+        .single();
+
+      if (error && error.code !== '23505') throw error;
+      if (error) {
+        await loadCloudVault();
+      } else {
+        if (state.cloudUser?.id !== userId) return;
+        state.cloudVault = data;
+      }
+    }
+
+    if (
+      state.cloudVault.salt !== bytesToBase64(salt) ||
+      state.cloudVault.generation !== generation
+    ) {
+      throw new Error('This account already has an encrypted history vault. Reload the page and unlock with its passphrase to sync.');
+    }
+  }
+
+  async function loadCloudHistory(key, userId = state.cloudUser?.id) {
+    if (!supabaseClient || !userId || !state.cloudVault) return [];
+
+    const generation = state.cloudVault.generation;
+    const entries = [];
+    const pageSize = 500;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabaseClient
+        .from(SUPABASE_HISTORY_TABLE)
+        .select('entry_id, encrypted_entry')
+        .eq('user_id', userId)
+        .eq('generation', generation)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      if (state.cloudUser?.id !== userId || state.cloudVault?.generation !== generation) {
+        throw new Error('The active sync account changed while history was loading.');
+      }
+      entries.push(...data);
+      if (data.length < pageSize) break;
+    }
+
+    const decrypted = await Promise.all(entries.map(async row => {
+      const entry = await decryptCloudEntry(row.encrypted_entry, key);
+      if (entry.entryId !== row.entry_id) {
+        throw new Error('A synced history entry failed its integrity check.');
+      }
+      return entry;
+    }));
+    if (state.cloudUser?.id !== userId || state.cloudVault?.generation !== generation) {
+      throw new Error('The active sync account changed while history was decrypting.');
+    }
+    state.syncedEntryIds = new Set(entries.map(entry => entry.entry_id));
+    return decrypted;
+  }
+
+  async function handleCloudSession(session) {
+    const nextUser = session?.user ?? null;
+    if (state.cloudUser?.id === nextUser?.id) return;
+
+    const previousUserId = state.cloudUser?.id;
+    if (previousUserId && previousUserId !== nextUser?.id) {
+      await state.historySaveQueue;
+      state.historyKey = null;
+      state.historySalt = null;
+      state.historyGeneration = null;
+      state.history = [];
+      state.iterationCount = 0;
+      renderHistory();
+    }
+
+    state.cloudUser = nextUser;
+    state.cloudVault = null;
+    state.cloudVaultError = null;
+    state.syncedEntryIds.clear();
+    if (nextUser) associateLegacyHistoryWithUser(nextUser.id);
+    updateSyncStatus();
+    if (!nextUser) {
+      updateHistoryLockStatus();
+      if (previousUserId) openHistoryDialog();
+      return;
+    }
+
+    try {
+      await loadCloudVault();
+      updateSyncStatus();
+      if (!state.historyKey) {
+        openHistoryDialog();
+        return;
+      }
+      if (
+        state.cloudVault &&
+        (
+          state.cloudVault.salt !== bytesToBase64(state.historySalt) ||
+          state.cloudVault.generation !== state.historyGeneration
+        )
+      ) {
+        updateSyncStatus('Cloud vault found. Lock history, then unlock using its passphrase to sync.');
+        return;
+      }
+
+      const remoteHistory = await loadCloudHistory(state.historyKey, nextUser.id);
+      state.history = mergeHistory(state.history, remoteHistory);
+      renumberHistory();
+      saveEncryptedHistory();
+    } catch (error) {
+      updateSyncStatus(`Sync unavailable: ${error.message || 'Check Supabase setup.'}`);
+    }
+  }
+
+  async function initializeHistorySync() {
+    if (!supabaseClient) {
+      updateSyncStatus();
+      updateHistoryLockStatus('Locked; unlock to view saved history.');
+      openHistoryDialog();
+      return;
+    }
+
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) {
+      updateSyncStatus(`Could not restore sign-in: ${error.message}`);
+    } else {
+      state.cloudUser = data.session?.user ?? null;
+      if (state.cloudUser) {
+        associateLegacyHistoryWithUser(state.cloudUser.id);
+        try {
+          await loadCloudVault();
+        } catch (vaultError) {
+          updateSyncStatus(`Could not load synced vault: ${vaultError.message}`);
+        }
+      }
+    }
+
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => {
+        handleCloudSession(session).catch(error => {
+          updateSyncStatus(`Sync unavailable: ${error.message || 'Check Supabase setup.'}`);
+        });
+      }, 0);
+    });
+
+    updateSyncStatus();
+    updateHistoryLockStatus();
+    openHistoryDialog();
+  }
+
+  async function syncHistoryToCloud(history, key, salt, generation) {
+    if (!supabaseClient || !state.cloudUser) return;
+    const userId = state.cloudUser.id;
+    state.historySyncQueue = state.historySyncQueue.then(async () => {
+      if (state.cloudUser?.id !== userId || state.historyKey !== key) return;
+      if (state.cloudUser?.id !== userId) return;
+      await ensureCloudVault(userId, salt, generation);
+      if (state.cloudUser?.id !== userId) return;
+      const unsynced = history.filter(entry => !state.syncedEntryIds.has(entry.entryId));
+      if (unsynced.length === 0) {
+        updateSyncStatus();
+        return;
+      }
+
+      const rows = await Promise.all(unsynced.map(async entry => ({
+        user_id: userId,
+        generation,
+        entry_id: entry.entryId,
+        encrypted_entry: await encryptCloudEntry(entry, key)
+      })));
+      const { error } = await supabaseClient
+        .from(SUPABASE_HISTORY_TABLE)
+        .upsert(rows, { onConflict: 'user_id,generation,entry_id', ignoreDuplicates: true });
+      if (error) throw error;
+      if (state.cloudUser?.id !== userId) return [];
+      unsynced.forEach(entry => state.syncedEntryIds.add(entry.entryId));
+      updateSyncStatus('History synced securely.');
+    }).catch(error => {
+      updateSyncStatus(`Sync failed: ${error.message || 'Check your connection and Supabase setup.'}`);
+      historyLockStatus.textContent = 'Local encrypted history is saved; cloud sync failed.';
+    });
+    await state.historySyncQueue;
   }
 
   function renderHistory() {
@@ -432,20 +773,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateStatusPills();
   }
 
-  function updateHistoryLockStatus(message) {
-    const isUnlocked = state.historyKey !== null;
-    historyLockBtn.textContent = isUnlocked ? 'Lock' : 'Unlock';
-    historyLockBtn.setAttribute(
-      'aria-label',
-      isUnlocked ? 'Lock encrypted calculation history' : 'Unlock encrypted calculation history'
-    );
-    historyLockStatus.textContent = message || (isUnlocked
-      ? 'Unlocked; saved encrypted on this device.'
-      : 'Locked; unlock to view saved history.');
-  }
-
   function hasSavedHistory() {
-    return localStorage.getItem(HISTORY_STORAGE_KEY) !== null;
+    return localStorage.getItem(getHistoryStorageKey()) !== null || state.cloudVault !== null;
   }
 
   function configureHistoryDialog(isExistingHistory) {
@@ -453,17 +782,19 @@ document.addEventListener('DOMContentLoaded', () => {
       ? 'Unlock Calculation History'
       : 'Set a History Passphrase';
     historyUnlockDescription.textContent = isExistingHistory
-      ? 'Enter the passphrase you created for this browser. Your passphrase is never stored. If you forget it, the saved history cannot be recovered. Anyone using this page while it is unlocked can view the history.'
-      : 'Create a passphrase of at least 12 characters. History is encrypted in this browser and cannot be recovered if you forget the passphrase. Anyone using this page while it is unlocked can view the history.';
+      ? `Enter the history passphrase${state.cloudVault ? ' used on your other devices' : ' created for this browser'}. Your passphrase is never stored. If you forget it, the saved history cannot be recovered. Anyone using this page while it is unlocked can view the history.`
+      : 'Create a passphrase of at least 12 characters. Use the same one on each device. History is encrypted in this browser and cannot be recovered if you forget the passphrase. Anyone using this page while it is unlocked can view the history.';
     historyConfirmGroup.classList.toggle('hidden', isExistingHistory);
     historyPassphraseConfirm.required = !isExistingHistory;
     historyPassphraseConfirm.value = '';
     historyPassphrase.value = '';
     historyUnlockError.textContent = '';
     historyUnlockSubmit.textContent = isExistingHistory ? 'Unlock' : 'Set passphrase';
-    historyUnlockSubmit.disabled = !crypto.subtle;
+    historyUnlockSubmit.disabled = !crypto.subtle || state.cloudVaultError !== null;
     if (!crypto.subtle) {
       historyUnlockError.textContent = 'Browser encryption is unavailable. Open this page in a modern browser over HTTPS or localhost.';
+    } else if (state.cloudVaultError) {
+      historyUnlockError.textContent = 'Could not check this account’s synced vault. Check the connection and reload before unlocking.';
     }
   }
 
@@ -475,7 +806,7 @@ document.addEventListener('DOMContentLoaded', () => {
       historyUnlockSubmit.disabled = true;
       historyUnlockError.textContent = 'Browser storage is unavailable, so encrypted history cannot be accessed.';
     }
-    historyUnlockDialog.showModal();
+    if (!historyUnlockDialog.open) historyUnlockDialog.showModal();
     historyPassphrase.focus();
   }
 
@@ -487,16 +818,21 @@ document.addEventListener('DOMContentLoaded', () => {
     renderHistory();
   }
 
-  function saveEncryptedHistory() {
+  function saveEncryptedHistory(syncCloud = true) {
     if (!state.historyKey) return;
 
     const key = state.historyKey;
+    const salt = state.historySalt;
+    const generation = state.historyGeneration;
+    const storageKey = getHistoryStorageKey();
+    const shouldSync = syncCloud && state.cloudUser !== null;
     const snapshot = JSON.stringify(state.history);
     state.historySaveQueue = state.historySaveQueue.then(async () => {
-      const record = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY));
-      const salt = base64ToBytes(record.salt);
-      const encryptedRecord = await encryptHistory(JSON.parse(snapshot), key, salt);
-      localStorage.setItem(HISTORY_STORAGE_KEY, encryptedRecord);
+      const encryptedRecord = await encryptHistory(JSON.parse(snapshot), key, salt, generation);
+      localStorage.setItem(storageKey, encryptedRecord);
+      if (shouldSync) {
+        await syncHistoryToCloud(JSON.parse(snapshot), key, salt, generation);
+      }
     }).catch(() => {
       updateHistoryLockStatus('Save failed; encrypted history may be out of date.');
       showToast('Could not save encrypted history. Check browser storage and try again.');
@@ -511,6 +847,8 @@ document.addEventListener('DOMContentLoaded', () => {
       a,
       b,
       symbol,
+      entryId: createEntryId(),
+      createdAt: Date.now(),
       expression: getExpression(choice, a, b),
       resultStr: `result=${formatted}`,
       time: new Date().toLocaleTimeString()
@@ -567,6 +905,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const exitEntry = {
         id: ++state.iterationCount,
         opName: OPERATION_NAMES[choice],
+        entryId: createEntryId(),
+        createdAt: Date.now(),
         expression: 'Option 5 (Exit)',
         resultStr: 'Exiting display',
         time: new Date().toLocaleTimeString()
@@ -656,15 +996,45 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Clear history
-  clearHistoryBtn.addEventListener('click', () => {
+  clearHistoryBtn.addEventListener('click', async () => {
     sound.click();
-    const hasPersistedHistory = state.historyKey === null && hasSavedHistory();
-    state.history = [];
-    state.iterationCount = 0;
-    renderHistory();
-    saveEncryptedHistory();
-    if (hasPersistedHistory) {
-      showToast('Unlock history to clear the saved entries.');
+    if (!state.historyKey || !state.historySalt || !state.historyGeneration) {
+      showToast('Unlock history before clearing saved entries.');
+      return;
+    }
+
+    clearHistoryBtn.disabled = true;
+    try {
+      await Promise.all([state.historySaveQueue, state.historySyncQueue]);
+      if (state.cloudUser) {
+        const userId = state.cloudUser.id;
+        const { data: generation, error } = await supabaseClient.rpc('clear_calculator_history');
+        if (error) {
+          updateSyncStatus(`Could not clear synced history: ${error.message}`);
+          showToast('Cloud history was not cleared. Check your connection and try again.');
+          return;
+        }
+        if (state.cloudUser?.id !== userId) {
+          showToast('Account changed before history could be cleared.');
+          return;
+        }
+        state.cloudVault.generation = generation;
+        state.historyGeneration = generation;
+        state.syncedEntryIds.clear();
+      }
+
+      state.history = [];
+      state.iterationCount = 0;
+      renderHistory();
+      saveEncryptedHistory(false);
+      updateSyncStatus(state.cloudUser
+        ? 'Synced history cleared on all devices.'
+        : 'Local history cleared; cloud history was not changed.');
+    } catch (error) {
+      updateSyncStatus(`Could not clear history: ${error.message || 'Check your connection and try again.'}`);
+      showToast('History was not cleared. Check your connection and try again.');
+    } finally {
+      clearHistoryBtn.disabled = false;
     }
   });
 
@@ -692,17 +1062,52 @@ document.addEventListener('DOMContentLoaded', () => {
   historyLockBtn.addEventListener('click', async () => {
     sound.click();
     if (state.historyKey) {
-      const pendingSaves = state.historySaveQueue;
+      historyLockBtn.disabled = true;
+      await state.historySaveQueue;
       state.historyKey = null;
+      state.historySalt = null;
+      state.historyGeneration = null;
       state.history = [];
       state.iterationCount = 0;
       renderHistory();
       updateHistoryLockStatus();
-      await pendingSaves;
+      historyLockBtn.disabled = false;
       return;
     }
     openHistoryDialog();
   });
+
+  async function toggleCloudSync() {
+    sound.click();
+    if (!supabaseClient) {
+      showToast('Configure Supabase first; see SUPABASE_SETUP.md.');
+      return;
+    }
+    historySyncBtn.disabled = true;
+    historyDialogSyncBtn.disabled = true;
+    try {
+      if (state.cloudUser) {
+        const { error } = await supabaseClient.auth.signOut();
+        if (error) throw error;
+        await handleCloudSession(null);
+      } else {
+        const { error } = await supabaseClient.auth.signInWithOAuth({
+          provider: 'github',
+          options: {
+            redirectTo: `${window.location.origin}${window.location.pathname}`
+          }
+        });
+        if (error) throw error;
+      }
+    } catch (error) {
+      updateSyncStatus(`GitHub sign-in failed: ${error.message || 'Check Supabase auth settings.'}`);
+      historySyncBtn.disabled = false;
+      historyDialogSyncBtn.disabled = false;
+    }
+  }
+
+  historySyncBtn.addEventListener('click', toggleCloudSync);
+  historyDialogSyncBtn.addEventListener('click', toggleCloudSync);
 
   historyUnlockForm.addEventListener('submit', async event => {
     event.preventDefault();
@@ -711,45 +1116,71 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const passphrase = historyPassphrase.value;
-      const storedValue = localStorage.getItem(HISTORY_STORAGE_KEY);
-      let key;
-      let savedHistory = [];
+      const storedValue = localStorage.getItem(getHistoryStorageKey());
+      if (state.cloudVaultError) {
+        throw new Error('Could not check this account’s cloud vault. Reload the page or sign out before unlocking.');
+      }
+      const localRecord = storedValue === null ? null : JSON.parse(storedValue);
+      const localSalt = localRecord ? base64ToBytes(localRecord.salt) : null;
+      const salt = state.cloudVault
+        ? base64ToBytes(state.cloudVault.salt)
+        : localSalt || crypto.getRandomValues(new Uint8Array(16));
+      const key = await deriveHistoryKey(passphrase, salt);
+      let localHistory = [];
+      let cloudHistory = [];
 
-      if (storedValue !== null) {
-        const record = JSON.parse(storedValue);
-        key = await deriveHistoryKey(passphrase, base64ToBytes(record.salt));
-        savedHistory = await decryptHistory(record, key);
-      } else {
+      if (localRecord) {
+        const localKey = state.cloudVault && bytesToBase64(localSalt) !== state.cloudVault.salt
+          ? await deriveHistoryKey(passphrase, localSalt)
+          : key;
+        localHistory = await decryptHistory(localRecord, localKey);
+        if (
+          state.cloudVault &&
+          localRecord.generation &&
+          localRecord.generation !== state.cloudVault.generation
+        ) {
+          localHistory = [];
+        }
+      }
+
+      if (state.cloudVault) {
+        cloudHistory = await loadCloudHistory(key);
+      } else if (!localRecord) {
         if (passphrase.length < 12) {
           throw new Error('Choose a passphrase with at least 12 characters.');
         }
         if (passphrase !== historyPassphraseConfirm.value) {
           throw new Error('The passphrases do not match.');
         }
-        const salt = crypto.getRandomValues(new Uint8Array(16));
-        key = await deriveHistoryKey(passphrase, salt);
-        const combinedHistory = state.history.slice();
-        combinedHistory.forEach((entry, index) => {
-          entry.id = combinedHistory.length - index;
-        });
-        const encryptedRecord = await encryptHistory(combinedHistory, key, salt);
-        localStorage.setItem(HISTORY_STORAGE_KEY, encryptedRecord);
-        savedHistory = [];
       }
 
-      const sessionHistory = state.history;
+      const generation = state.cloudVault?.generation ||
+        localRecord?.generation ||
+        createEntryId();
+      const historyBeforeUnlock = state.history;
       state.historyKey = key;
-      state.history = sessionHistory.concat(savedHistory);
+      state.historySalt = salt;
+      state.historyGeneration = generation;
+      state.history = mergeHistory(historyBeforeUnlock, localHistory, cloudHistory);
+      if (state.cloudUser && !state.cloudVault) {
+        await ensureCloudVault(state.cloudUser.id, salt, generation);
+      }
+      if (state.cloudUser && state.cloudVault) {
+        const latestCloudHistory = await loadCloudHistory(key);
+        state.history = mergeHistory(state.history, latestCloudHistory);
+      }
       renumberHistory();
       historyPassphrase.value = '';
       historyPassphraseConfirm.value = '';
       historyUnlockDialog.close();
       updateHistoryLockStatus();
-      if (storedValue !== null && sessionHistory.length > 0) {
-        saveEncryptedHistory();
-      }
+      saveEncryptedHistory();
+      updateSyncStatus();
       showToast('Encrypted history unlocked.');
     } catch (error) {
+      state.historyKey = null;
+      state.historySalt = null;
+      state.historyGeneration = null;
       historyUnlockError.textContent = error instanceof Error
         ? error.message === 'The saved history uses an unsupported format.' ||
           error.message === 'The saved history has an invalid format.'
@@ -761,7 +1192,7 @@ document.addEventListener('DOMContentLoaded', () => {
       historyPassphrase.value = '';
       historyPassphrase.focus();
     } finally {
-      historyUnlockSubmit.disabled = !crypto.subtle;
+      historyUnlockSubmit.disabled = !crypto.subtle || state.cloudVaultError !== null;
     }
   });
 
@@ -811,6 +1242,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initial calculation
   updateStatusPills();
   updateInputVisibility(state.currentChoice);
-  updateHistoryLockStatus('Locked; unlock to view or save encrypted history.');
-  openHistoryDialog();
+  updateHistoryLockStatus('Locked; unlock to view saved history.');
+  initializeHistorySync().catch(error => {
+    updateSyncStatus(`Could not initialize cloud sync: ${error.message}`);
+    openHistoryDialog();
+  });
 });
