@@ -781,6 +781,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Keyboard navigation shortcuts
   document.addEventListener('keydown', (e) => {
+    if (historyUnlockDialog.open) return;
+
     const activeEl = document.activeElement;
     const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
 
