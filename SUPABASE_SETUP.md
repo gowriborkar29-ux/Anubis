@@ -21,12 +21,12 @@ The publishable key is intended for browser apps. The SQL enables row-level secu
 ## 2. Configure GitHub sign-in
 
 1. In Supabase, open **Authentication → Sign In / Providers → GitHub** and copy the callback URL shown there.
-2. Create a GitHub OAuth App under [GitHub Developer settings](https://github.com/settings/developers). Set its homepage URL to `https://gowriborkar29-ux.github.io/calci2/` and its authorization callback URL to the Supabase callback URL.
+2. Create a GitHub OAuth App under [GitHub Developer settings](https://github.com/settings/developers). Set its homepage URL to `https://gowriborkar29-ux.github.io/Anubis/` and its authorization callback URL to the Supabase callback URL.
 3. Copy the GitHub OAuth app's client ID and generate a client secret. Enter both in the Supabase GitHub provider settings, then enable and save the provider. Keep the client secret in Supabase; do not put it in this repository.
-4. In Supabase **Authentication → URL Configuration**, set the site URL to `https://gowriborkar29-ux.github.io/calci2/` and add that same URL to the allowed redirect URLs.
+4. In Supabase **Authentication → URL Configuration**, set the site URL to `https://gowriborkar29-ux.github.io/Anubis/` and add that same URL to the allowed redirect URLs.
 
 ## 3. Deploy and use sync
 
-Commit and push `supabase-config.js` after filling in the project URL and publishable key. GitHub Pages will deploy the configuration with the site. Select **Sync with GitHub** in the history dialog (or in the history panel after dismissing the dialog) on each device, authorize the same GitHub account, then unlock the history with the same passphrase. Each account has an isolated history vault.
+Commit and push `supabase-config.js` after filling in the project URL and publishable key. GitHub Pages will deploy the configuration with the site at `https://gowriborkar29-ux.github.io/Anubis/`. Select **Sync with GitHub** in the history dialog (or in the history panel after dismissing the dialog) on each device, authorize the same GitHub account, then unlock the history with the same passphrase. Each account has an isolated history vault.
 
 The passphrase is never saved. Lock history when finished. Clearing history while unlocked clears synced entries for that account as well as local history on all devices.
